@@ -1,101 +1,233 @@
-import Image from "next/image";
+// app/page.tsx
+"use client";
+
+import Pusher from "pusher-js";
+import { useEffect, useState } from "react";
+import { ToastContainer, toast } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
+
+type User = {
+  id: string;
+  name: string;
+};
+
+type Notification = {
+  id: string;
+  message: string;
+};
+
+type PendingRequest = {
+  id: string;
+  from: string;
+};
+
+const users: User[] = [
+  { id: "1", name: "User 1" },
+  { id: "2", name: "User 2" },
+  { id: "3", name: "User 3" },
+];
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const [leftNotifications, setLeftNotifications] = useState<Notification[]>(
+    []
+  );
+  const [rightNotifications, setRightNotifications] = useState<Notification[]>(
+    []
+  );
+  const [leftPendingRequests, setLeftPendingRequests] = useState<
+    PendingRequest[]
+  >([]);
+  const [rightPendingRequests, setRightPendingRequests] = useState<
+    PendingRequest[]
+  >([]);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  useEffect(() => {
+    const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY!, {
+      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
+    });
+
+    const channel = pusher.subscribe("notifications");
+    channel.bind(
+      "new-notification",
+      (data: { side: "left" | "right"; notification: Notification }) => {
+        if (data.side === "left") {
+          setLeftNotifications((prev) => [...prev, data.notification]);
+        } else {
+          setRightNotifications((prev) => [...prev, data.notification]);
+        }
+        toast(
+          `${data.side.charAt(0).toUpperCase() + data.side.slice(1)} side: ${
+            data.notification.message
+          }`
+        );
+      }
+    );
+
+    channel.bind(
+      "new-request",
+      (data: { side: "left" | "right"; request: PendingRequest }) => {
+        if (data.side === "left") {
+          setLeftPendingRequests((prev) => [...prev, data.request]);
+        } else {
+          setRightPendingRequests((prev) => [...prev, data.request]);
+        }
+      }
+    );
+
+    return () => {
+      pusher.unsubscribe("notifications");
+    };
+  }, []);
+
+  const sendRequest = async (from: User, to: "left" | "right") => {
+    const response = await fetch("/api/notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "sendRequest", from, to }),
+    });
+
+    if (response.ok) {
+      console.log(`Request sent from ${from.name} to ${to} side`);
+    }
+  };
+
+  const acceptRequest = async (
+    request: PendingRequest,
+    side: "left" | "right"
+  ) => {
+    const response = await fetch("/api/notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "acceptRequest", request, side }),
+    });
+
+    if (response.ok) {
+      console.log(`Request from ${request.from} accepted on ${side} side`);
+      if (side === "left") {
+        setLeftPendingRequests((prev) =>
+          prev.filter((r) => r.id !== request.id)
+        );
+      } else {
+        setRightPendingRequests((prev) =>
+          prev.filter((r) => r.id !== request.id)
+        );
+      }
+    }
+  };
+
+  return (
+    <main className="min-h-screen bg-gray-100 py-6 flex justify-center items-center">
+      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+        <h1 className="text-4xl font-bold text-center mb-10">
+          Notification System
+        </h1>
+        <div className="flex justify-between">
+          {/* Left Side */}
+          <div className="w-1/2 pr-4">
+            <h2 className="text-2xl font-semibold mb-4">Left Side</h2>
+            <div className="bg-white shadow rounded-lg p-6">
+              <div className="mb-4">
+                <h3 className="text-lg font-medium mb-2">
+                  Notifications ({leftNotifications.length})
+                </h3>
+                {leftNotifications.map((notification) => (
+                  <div
+                    key={notification.id}
+                    className="bg-blue-100 p-2 rounded mb-2"
+                  >
+                    {notification.message}
+                  </div>
+                ))}
+              </div>
+              <div>
+                <h3 className="text-lg font-medium mb-2">
+                  Pending Requests ({leftPendingRequests.length})
+                </h3>
+                {leftPendingRequests.map((request) => (
+                  <div
+                    key={request.id}
+                    className="bg-yellow-100 p-2 rounded mb-2 flex justify-between items-center"
+                  >
+                    <span>From: {request.from}</span>
+                    <button
+                      onClick={() => acceptRequest(request, "left")}
+                      className="bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600"
+                    >
+                      Accept
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Right Side */}
+          <div className="w-1/2 pl-4">
+            <h2 className="text-2xl font-semibold mb-4">Right Side</h2>
+            <div className="bg-white shadow rounded-lg p-6">
+              <div className="mb-4">
+                <h3 className="text-lg font-medium mb-2">
+                  Notifications ({rightNotifications.length})
+                </h3>
+                {rightNotifications.map((notification) => (
+                  <div
+                    key={notification.id}
+                    className="bg-blue-100 p-2 rounded mb-2"
+                  >
+                    {notification.message}
+                  </div>
+                ))}
+              </div>
+              <div>
+                <h3 className="text-lg font-medium mb-2">
+                  Pending Requests ({rightPendingRequests.length})
+                </h3>
+                {rightPendingRequests.map((request) => (
+                  <div
+                    key={request.id}
+                    className="bg-yellow-100 p-2 rounded mb-2 flex justify-between items-center"
+                  >
+                    <span>From: {request.from}</span>
+                    <button
+                      onClick={() => acceptRequest(request, "right")}
+                      className="bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600"
+                    >
+                      Accept
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+
+        {/* User Actions */}
+        <div className="mt-10">
+          <h2 className="text-2xl font-semibold mb-4">Send Requests</h2>
+          <div className="flex justify-center space-x-4">
+            {users.map((user) => (
+              <div key={user.id} className="bg-white shadow rounded-lg p-4">
+                <h3 className="text-lg font-medium mb-2">{user.name}</h3>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => sendRequest(user, "left")}
+                    className="w-full bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                  >
+                    Send to Left
+                  </button>
+                  <button
+                    onClick={() => sendRequest(user, "right")}
+                    className="w-full bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600"
+                  >
+                    Send to Right
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <ToastContainer />
+    </main>
   );
 }
